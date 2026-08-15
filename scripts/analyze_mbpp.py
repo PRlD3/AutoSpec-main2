@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def load_records(path):
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     try:
         data = json.loads(text)
     except json.JSONDecodeError:

@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def load_records(path):
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -71,6 +71,10 @@ def expression(node):
 
 def statement(node, indent):
     prefix = "    " * indent
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        return []
+    if isinstance(node, ast.Pass):
+        return []
     if isinstance(node, ast.Return):
         return [f"{prefix}return {expression(node.value)};"]
     if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
@@ -117,9 +121,12 @@ def convert_record(record, output_dir):
     if isinstance(tests, str):
         tests = [line for line in tests.splitlines() if line.strip()]
     for test in tests:
-        match = re.search(r"assert\s*\((.*)\)", test)
+        match = re.search(r"^\s*assert\s+(.+?)\s*$", test)
         if match:
-            lines.append(f"\nint main(void) {{\n    assert({match.group(1)});\n    return 0;\n}}")
+            assertion = match.group(1)
+            if assertion.startswith("(") and assertion.endswith(")"):
+                assertion = assertion[1:-1]
+            lines.append(f"\nint main(void) {{\n    assert({assertion});\n    return 0;\n}}")
             break
     path = output_dir / f"{task_id}.c"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
