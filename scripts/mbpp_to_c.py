@@ -22,6 +22,11 @@ def load_records(path):
     raise ValueError("JSON 顶层必须是数组，或包含 data/records/examples/tasks 数组")
 
 
+def safe_task_id(record):
+    raw = str(record.get("task_id", record.get("id", record.get("key", "unknown"))))
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._") or "unknown"
+
+
 def value_type(value):
     if isinstance(value, bool):
         return "int"
@@ -192,7 +197,7 @@ def statement(node, indent, declared, list_names):
 def convert_record(record, output_dir):
     solution = record.get("solutions", {}).get("no_tests", {})
     code = solution.get("code", record.get("code", ""))
-    task_id = str(record.get("task_id", record.get("id", record.get("key", "unknown"))))
+    task_id = safe_task_id(record)
     if not code:
         raise ValueError("缺少 code 字段")
     tree = ast.parse(code)
@@ -232,6 +237,7 @@ def convert_record(record, output_dir):
             lines.append(f"\nint main(void) {{\n    assert({assertion_code});\n    return 0;\n}}")
             break
     path = output_dir / f"{task_id}.c"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
@@ -247,7 +253,7 @@ def main():
     failures = []
     converted = 0
     for record in load_records(args.input):
-        task_id = str(record.get("task_id", record.get("id", record.get("key", "unknown")))) if isinstance(record, dict) else "unknown"
+        task_id = safe_task_id(record) if isinstance(record, dict) else "unknown"
         try:
             convert_record(record, args.output_dir)
             converted += 1
