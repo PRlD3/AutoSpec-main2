@@ -98,7 +98,7 @@ def statement(node, indent):
 def convert_record(record, output_dir):
     solution = record.get("solutions", {}).get("no_tests", {})
     code = solution.get("code", record.get("code", ""))
-    task_id = str(record.get("task_id", record.get("id", "unknown")))
+    task_id = str(record.get("task_id", record.get("id", record.get("key", "unknown"))))
     if not code:
         raise ValueError("缺少 code 字段")
     tree = ast.parse(code)
@@ -137,7 +137,7 @@ def main():
     failures = []
     converted = 0
     for record in load_records(args.input):
-        task_id = str(record.get("task_id", record.get("id", "unknown"))) if isinstance(record, dict) else "unknown"
+        task_id = str(record.get("task_id", record.get("id", record.get("key", "unknown")))) if isinstance(record, dict) else "unknown"
         try:
             convert_record(record, args.output_dir)
             converted += 1

@@ -1,0 +1,33 @@
+{
+  "total_records": 399,
+  "object_records": 399,
+  "record_types": {
+    "object": 399
+  },
+  "field_counts": {
+    "key": 399,
+    "difficulty": 399,
+    "signature": 399,
+    "target_response": 399,
+    "imports": 399,
+    "starting_prompt": 399,
+    "tests": 399,
+    "solutions": 399,
+    "status": 399,
+    "eval_plus": 399,
+    "no_tests": 399,
+    "latest_generation": 399,
+    "with_tests": 104,
+    "alt_verification_1": 63,
+    "remediation_1": 63,
+    "test_memory": 63,
+    "alt_verification_2": 44,
+    "remediation_2": 44,
+    "alt_verification_3": 37,
+    "remediation_3": 37,
+    "alt_verification_4": 5,
+    "remediation_4": 5,
+    "alt_verification_5": 1,
+    "remediation_5": 1
+  }
+}
