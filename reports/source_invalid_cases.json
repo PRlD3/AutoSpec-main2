@@ -1,0 +1,20 @@
+[
+  {
+    "task_id": "Mbpp_138",
+    "classification": "source_invalid",
+    "reason": "所有候选 Python 实现均未通过数据集测试，源实现与测试期望不一致",
+    "tests": [
+      "is_Sum_Of_Powers_Of_Two(10) == True",
+      "is_Sum_Of_Powers_Of_Two(7) == False",
+      "is_Sum_Of_Powers_Of_Two(14) == True"
+    ],
+    "evidence": {
+      "no_tests_verifier_status": "TESTS_FAILED",
+      "with_tests_verifier_status": "TESTS_FAILED",
+      "latest_generation_stage": "remediation_3",
+      "failed_input": 10,
+      "expected": true,
+      "observed": false
+    }
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "total_records": 399,
+  "source_invalid": 1,
+  "source_valid": 398,
+  "conversion_generated": 47,
+  "conversion_rejected": 351,
+  "gcc_compiled": 47,
+  "gcc_compile_failed": 0,
+  "runtime_passed": 46,
+  "runtime_failed": 0,
+  "runtime_tested": 46,
+  "conversion_success_rate_over_source_valid": 11.8,
+  "gcc_success_rate_over_generated": 100.0,
+  "runtime_success_rate_over_runtime_tested": 100.0,
+  "runtime_success_rate_over_generated": 97.9,
+  "categories": {
+    "source_invalid": ["Mbpp_138"],
+    "conversion_rejected": 351,
+    "gcc_compile_failed": 0,
+    "runtime_failed": 0
+  }
+}
