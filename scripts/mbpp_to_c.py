@@ -247,10 +247,27 @@ def local_declarations(function):
     return declarations
 
 
+def select_code(record):
+    solutions = record.get("solutions", {})
+    with_tests = solutions.get("with_tests", {})
+    if with_tests.get("verifier_status") == "SUCCESS" and with_tests.get("code"):
+        return with_tests["code"]
+    latest = record.get("latest_generation", {})
+    if latest.get("stage") == "with_tests" and latest.get("code"):
+        return latest["code"]
+    if latest.get("code"):
+        return latest["code"]
+    no_tests = solutions.get("no_tests", {})
+    if no_tests.get("code"):
+        return no_tests["code"]
+    if record.get("code"):
+        return record["code"]
+    raise ValueError("缺少可用 code 字段")
+
+
 def convert_record(record, output_dir):
     global _allowed_calls
-    solution = record.get("solutions", {}).get("no_tests", {})
-    code = solution.get("code", record.get("code", ""))
+    code = select_code(record)
     task_id = safe_task_id(record)
     if not code:
         raise ValueError("缺少 code 字段")
