@@ -6,6 +6,9 @@ import re
 from pathlib import Path
 
 
+_allowed_calls = set()
+
+
 def load_records(path):
     text = path.read_text(encoding="utf-8-sig")
     try:
@@ -37,6 +40,10 @@ def value_type(value):
     return None
 
 
+def is_list_expression(node):
+    return isinstance(node, (ast.List, ast.ListComp)) or (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice))
+
+
 def expression(node, list_names=None, substitutions=None):
     list_names = list_names or set()
     substitutions = substitutions or {}
@@ -51,6 +58,8 @@ def expression(node, list_names=None, substitutions=None):
     if isinstance(node, ast.Name):
         return substitutions.get(node.id, node.id)
     if isinstance(node, ast.List):
+        if any(isinstance(item, (ast.List, ast.Tuple, ast.Dict, ast.Set)) for item in node.elts):
+            raise ValueError("不支持嵌套或复合类型列表")
         values = ", ".join(expression(item, list_names) for item in node.elts)
         return f"make_int_list((int[]){{{values}}}, {len(node.elts)})"
     if isinstance(node, ast.ListComp):
@@ -91,11 +100,22 @@ def expression(node, list_names=None, substitutions=None):
         return f"abs({expression(node.args[0], list_names)})"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"sum", "min", "max"} and len(node.args) == 1:
         return f"{node.func.id}_int_list({expression(node.args[0], list_names)})"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"min", "max"} and len(node.args) >= 2:
+        values = [expression(arg, list_names) for arg in node.args]
+        operator = "<" if node.func.id == "min" else ">"
+        result = values[0]
+        for value in values[1:]:
+            result = f"(({result}) {operator} ({value}) ? ({result}) : ({value}))"
+        return result
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "int" and len(node.args) == 1:
+        return f"((int)({expression(node.args[0], list_names)}))"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sorted" and len(node.args) == 1:
         return f"sorted_int_list({expression(node.args[0], list_names)})"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        args = ", ".join(expression(arg, list_names) for arg in node.args)
-        return f"{node.func.id}({args})"
+        if node.func.id in _allowed_calls:
+            args = ", ".join(expression(arg, list_names) for arg in node.args)
+            return f"{node.func.id}({args})"
+        raise ValueError(f"不支持的函数调用: {ast.unparse(node)}")
     raise ValueError(f"不支持的表达式: {ast.dump(node, include_attributes=False)}")
 
 
@@ -129,17 +149,15 @@ def statement(node, indent, declared, list_names):
             source = expression(generator.iter, list_names)
             variable = generator.target.id
             value = expression(node.value.elt, list_names, {variable: f"{source}.data[i]"})
-            declared.add(target)
             list_names.add(target)
-            return [f"{prefix}IntList {target} = make_empty_int_list();", f"{prefix}for (int i = 0; i < {source}.length; i++) {{", f"{prefix}    append_int_list(&{target}, {value});", f"{prefix}}}"]
+            return [f"{prefix}{target} = make_empty_int_list();", f"{prefix}for (int i = 0; i < {source}.length; i++) {{", f"{prefix}    append_int_list(&{target}, {value});", f"{prefix}}}"]
         value = expression(node.value, list_names)
         if target in declared:
             return [f"{prefix}{target} = {value};"]
-        declared.add(target)
         if isinstance(node.value, (ast.List, ast.Subscript, ast.ListComp)) and (isinstance(node.value, (ast.List, ast.ListComp)) or isinstance(node.value.slice, ast.Slice)):
             list_names.add(target)
-            return [f"{prefix}IntList {target} = {value};"]
-        return [f"{prefix}int {target} = {value};"]
+            return [f"{prefix}{target} = {value};"]
+        return [f"{prefix}{target} = {value};"]
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "append" and len(node.value.args) == 1:
         if not isinstance(node.value.func.value, ast.Name):
             raise ValueError("append 目前只支持变量列表")
@@ -194,7 +212,18 @@ def statement(node, indent, declared, list_names):
     raise ValueError(f"不支持的语句: {ast.dump(node, include_attributes=False)}")
 
 
+def local_declarations(function):
+    declarations = {}
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            target = node.targets[0].id
+            if target not in declarations:
+                declarations[target] = "IntList" if is_list_expression(node.value) else "int"
+    return declarations
+
+
 def convert_record(record, output_dir):
+    global _allowed_calls
     solution = record.get("solutions", {}).get("no_tests", {})
     code = solution.get("code", record.get("code", ""))
     task_id = safe_task_id(record)
@@ -205,6 +234,10 @@ def convert_record(record, output_dir):
     if len(functions) != 1:
         raise ValueError("每条记录必须包含一个顶层函数")
     function = functions[0]
+    _allowed_calls = {function.name}
+    for node in ast.walk(function):
+        if isinstance(node, ast.List) and any(isinstance(item, (ast.List, ast.Tuple, ast.Dict, ast.Set)) for item in node.elts):
+            raise ValueError("不支持嵌套或复合类型列表")
     list_args = set()
     for node in ast.walk(function):
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
@@ -217,8 +250,11 @@ def convert_record(record, output_dir):
             list_args.add(node.iter.id)
     args = ", ".join(f"IntList {arg.arg}" if arg.arg in list_args else f"int {arg.arg}" for arg in function.args.args)
     lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; int capacity; } IntList;", "", "static IntList make_empty_int_list(void) { return (IntList){malloc(sizeof(int) * 4), 0, 4}; }", "static IntList make_int_list(int *data, int length) { IntList result = make_empty_int_list(); while (result.capacity < length) { result.capacity *= 2; result.data = realloc(result.data, sizeof(int) * result.capacity); } for (int i = 0; i < length; i++) result.data[i] = data[i]; result.length = length; return result; }", "static void append_int_list(IntList *list, int value) { if (list->length == list->capacity) { list->capacity *= 2; list->data = realloc(list->data, sizeof(int) * list->capacity); } list->data[list->length++] = value; }", "static int sum_int_list(IntList list) { int result = 0; for (int i = 0; i < list.length; i++) result += list.data[i]; return result; }", "static int min_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] < result) result = list.data[i]; return result; }", "static int max_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] > result) result = list.data[i]; return result; }", "static IntList slice_int_list(IntList list, int start, int stop) { if (start < 0) start = 0; if (stop > list.length) stop = list.length; if (stop < start) stop = start; return make_int_list(list.data + start, stop - start); }", "static IntList sorted_int_list(IntList list) { IntList result = make_int_list(list.data, list.length); for (int i = 0; i < result.length; i++) for (int j = i + 1; j < result.length; j++) if (result.data[j] < result.data[i]) { int t = result.data[i]; result.data[i] = result.data[j]; result.data[j] = t; } return result; }", "", f"int {function.name}({args}) {{"]
-    declared = {arg.arg for arg in function.args.args}
+    local_types = local_declarations(function)
+    declared = {arg.arg for arg in function.args.args} | set(local_types)
     list_names = set(list_args)
+    declaration_lines = [f"    {local_types[name]} {name};" for name in local_types]
+    lines.extend(declaration_lines)
     for node in function.body:
         lines.extend(statement(node, 1, declared, list_names))
     if not function.body or not isinstance(function.body[-1], ast.Return):
