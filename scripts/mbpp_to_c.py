@@ -48,7 +48,14 @@ def expression(node, list_names=None):
         values = ", ".join(expression(item, list_names) for item in node.elts)
         return f"make_int_list((int[]){{{values}}}, {len(node.elts)})"
     if isinstance(node, ast.Subscript):
-        return f"{expression(node.value, list_names)}.data[{expression(node.slice, list_names)}]"
+        value = expression(node.value, list_names)
+        if isinstance(node.slice, ast.Slice):
+            if node.slice.lower is None or node.slice.upper is None or node.slice.step is not None:
+                raise ValueError("列表切片目前需要 start、stop 且不支持 step")
+            start = expression(node.slice.lower, list_names)
+            stop = expression(node.slice.upper, list_names)
+            return f"slice_int_list({value}, {start}, {stop})"
+        return f"{value}.data[{expression(node.slice, list_names)}]"
     if isinstance(node, ast.BinOp):
         operators = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/", ast.FloorDiv: "/", ast.Mod: "%"}
         operator = operators.get(type(node.op))
@@ -74,6 +81,8 @@ def expression(node, list_names=None):
         return f"{expression(node.args[0], list_names)}.length"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "abs" and len(node.args) == 1:
         return f"abs({expression(node.args[0], list_names)})"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"sum", "min", "max"} and len(node.args) == 1:
+        return f"{node.func.id}_int_list({expression(node.args[0], list_names)})"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         args = ", ".join(expression(arg, list_names) for arg in node.args)
         return f"{node.func.id}({args})"
@@ -107,7 +116,7 @@ def statement(node, indent, declared, list_names):
         if target in declared:
             return [f"{prefix}{target} = {value};"]
         declared.add(target)
-        if isinstance(node.value, ast.List):
+        if isinstance(node.value, (ast.List, ast.Subscript)) and (isinstance(node.value, ast.List) or isinstance(node.value.slice, ast.Slice)):
             list_names.add(target)
             return [f"{prefix}IntList {target} = {value};"]
         return [f"{prefix}int {target} = {value};"]
@@ -179,7 +188,7 @@ def convert_record(record, output_dir):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "len" and node.args and isinstance(node.args[0], ast.Name):
             list_args.add(node.args[0].id)
     args = ", ".join(f"IntList {arg.arg}" if arg.arg in list_args else f"int {arg.arg}" for arg in function.args.args)
-    lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; } IntList;", "", "static IntList make_int_list(int *data, int length) { return (IntList){data, length}; }", "", f"int {function.name}({args}) {{"]
+    lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; } IntList;", "", "static IntList make_int_list(int *data, int length) { return (IntList){data, length}; }", "static int sum_int_list(IntList list) { int result = 0; for (int i = 0; i < list.length; i++) result += list.data[i]; return result; }", "static int min_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] < result) result = list.data[i]; return result; }", "static int max_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] > result) result = list.data[i]; return result; }", "static IntList slice_int_list(IntList list, int start, int stop) { if (start < 0) start = 0; if (stop > list.length) stop = list.length; if (stop < start) stop = start; return make_int_list(list.data + start, stop - start); }", "", f"int {function.name}({args}) {{"]
     declared = {arg.arg for arg in function.args.args}
     list_names = set(list_args)
     for node in function.body:
