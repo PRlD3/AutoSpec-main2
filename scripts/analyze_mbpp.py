@@ -17,6 +17,8 @@ def load_records(path):
         for key in ("data", "records", "examples", "tasks"):
             if isinstance(data.get(key), list):
                 return data[key]
+        if all(isinstance(value, dict) for value in data.values()):
+            return list(data.values())
     raise ValueError("JSON 顶层必须是数组，或包含 data/records/examples/tasks 数组")
 
 

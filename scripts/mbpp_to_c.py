@@ -17,6 +17,8 @@ def load_records(path):
     for key in ("data", "records", "examples", "tasks"):
         if isinstance(data, dict) and isinstance(data.get(key), list):
             return data[key]
+    if isinstance(data, dict) and all(isinstance(value, dict) for value in data.values()):
+        return list(data.values())
     raise ValueError("JSON 顶层必须是数组，或包含 data/records/examples/tasks 数组")
 
 
@@ -94,7 +96,8 @@ def statement(node, indent):
 
 
 def convert_record(record, output_dir):
-    code = record.get("code", record.get("prompt", ""))
+    solution = record.get("solutions", {}).get("no_tests", {})
+    code = solution.get("code", record.get("code", ""))
     task_id = str(record.get("task_id", record.get("id", "unknown")))
     if not code:
         raise ValueError("缺少 code 字段")
@@ -111,6 +114,8 @@ def convert_record(record, output_dir):
         raise ValueError("函数必须以 return 结束")
     lines.append("}")
     tests = record.get("test_list", record.get("tests", []))
+    if isinstance(tests, str):
+        tests = [line for line in tests.splitlines() if line.strip()]
     for test in tests:
         match = re.search(r"assert\s*\((.*)\)", test)
         if match:
