@@ -214,10 +214,11 @@ def statement(node, indent, declared, list_names):
 
 def local_declarations(function):
     declarations = {}
+    arguments = {arg.arg for arg in function.args.args}
     for node in ast.walk(function):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             target = node.targets[0].id
-            if target not in declarations:
+            if target not in arguments and target not in declarations:
                 declarations[target] = "IntList" if is_list_expression(node.value) else "int"
     return declarations
 
