@@ -19,6 +19,8 @@ AutoSpec+ is a neuro-symbolic tool that automates formal specification writing f
 
 The tool operates through five main stages: static analysis, neural specification generation, formal verification, iterative repair, and optional termination analysis.
 
+The MBPP-to-C research workflow and validity criteria are documented in [docs/conversion_workflow.md](docs/conversion_workflow.md).
+
 <p align="center">
   <img src="fig/overview_new.png" width="80%">
 </p>
