@@ -1,0 +1,15 @@
+experient_results
+test
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.env
+output/*
+!output/.gitkeep
+reports/*
+!reports/.gitkeep
+*.pickle
+*.log
