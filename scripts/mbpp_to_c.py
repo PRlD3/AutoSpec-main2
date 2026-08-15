@@ -44,7 +44,7 @@ def expression(node):
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.BinOp):
-        operators = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/", ast.Mod: "%"}
+        operators = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/", ast.FloorDiv: "/", ast.Mod: "%"}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的二元运算")
@@ -69,7 +69,20 @@ def expression(node):
     raise ValueError(f"不支持的表达式: {ast.dump(node, include_attributes=False)}")
 
 
-def statement(node, indent):
+def range_expression(node):
+    if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != "range":
+        raise ValueError("for 循环目前只支持 range")
+    if not 1 <= len(node.args) <= 3:
+        raise ValueError("range 参数数量不支持")
+    values = [expression(arg) for arg in node.args]
+    if len(values) == 1:
+        return "0", values[0], "1"
+    if len(values) == 2:
+        return values[0], values[1], "1"
+    return values[0], values[1], values[2]
+
+
+def statement(node, indent, declared):
     prefix = "    " * indent
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
         return []
@@ -79,8 +92,11 @@ def statement(node, indent):
         return [f"{prefix}return {expression(node.value)};"]
     if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
         target = node.targets[0].id
-        type_name = value_type(node.value) or "int"
-        return [f"{prefix}{type_name} {target} = {expression(node.value)};"]
+        value = expression(node.value)
+        if target in declared:
+            return [f"{prefix}{target} = {value};"]
+        declared.add(target)
+        return [f"{prefix}int {target} = {value};"]
     if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
         operators = {ast.Add: "+=", ast.Sub: "-=", ast.Mult: "*=", ast.Div: "/=", ast.Mod: "%="}
         operator = operators.get(type(node.op))
@@ -93,9 +109,41 @@ def statement(node, indent):
     if isinstance(node, ast.If) and len(node.orelse) == 0:
         lines = [f"{prefix}if ({expression(node.test)}) {{"]
         for child in node.body:
-            lines.extend(statement(child, indent + 1))
+            lines.extend(statement(child, indent + 1, declared))
         lines.append(f"{prefix}}}")
         return lines
+    if isinstance(node, ast.If):
+        lines = [f"{prefix}if ({expression(node.test)}) {{"]
+        for child in node.body:
+            lines.extend(statement(child, indent + 1, declared))
+        lines.append(f"{prefix}}} else {{")
+        for child in node.orelse:
+            lines.extend(statement(child, indent + 1, declared))
+        lines.append(f"{prefix}}}")
+        return lines
+    if isinstance(node, ast.For) and isinstance(node.target, ast.Name):
+        start, stop, step = range_expression(node.iter)
+        target = node.target.id
+        if target not in declared:
+            declared.add(target)
+        condition = f"{target} < {stop}" if step == "1" else f"{target} > {stop}"
+        lines = [f"{prefix}for (int {target} = {start}; {condition}; {target} += {step}) {{"]
+        for child in node.body:
+            lines.extend(statement(child, indent + 1, declared))
+        lines.append(f"{prefix}}}")
+        if node.orelse:
+            raise ValueError("for...else 未实现")
+        return lines
+    if isinstance(node, ast.While):
+        lines = [f"{prefix}while ({expression(node.test)}) {{"]
+        for child in node.body:
+            lines.extend(statement(child, indent + 1, declared))
+        lines.append(f"{prefix}}}")
+        if node.orelse:
+            raise ValueError("while...else 未实现")
+        return lines
+    if isinstance(node, (ast.Break, ast.Continue)):
+        return [f"{prefix}{'break' if isinstance(node, ast.Break) else 'continue'};"]
     raise ValueError(f"不支持的语句: {ast.dump(node, include_attributes=False)}")
 
 
@@ -112,8 +160,9 @@ def convert_record(record, output_dir):
     function = functions[0]
     args = ", ".join(f"int {arg.arg}" for arg in function.args.args)
     lines = ["#include <assert.h>", "#include <stdlib.h>", "", f"int {function.name}({args}) {{"]
+    declared = {arg.arg for arg in function.args.args}
     for node in function.body:
-        lines.extend(statement(node, 1))
+        lines.extend(statement(node, 1, declared))
     if not function.body or not isinstance(function.body[-1], ast.Return):
         raise ValueError("函数必须以 return 结束")
     lines.append("}")
