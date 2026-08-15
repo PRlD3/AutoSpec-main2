@@ -32,8 +32,9 @@ def value_type(value):
     return None
 
 
-def expression(node, list_names=None):
+def expression(node, list_names=None, substitutions=None):
     list_names = list_names or set()
+    substitutions = substitutions or {}
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool):
             return "1" if node.value else "0"
@@ -43,10 +44,12 @@ def expression(node, list_names=None):
             raise ValueError("字符串表达式未实现")
         return repr(node.value)
     if isinstance(node, ast.Name):
-        return node.id
+        return substitutions.get(node.id, node.id)
     if isinstance(node, ast.List):
         values = ", ".join(expression(item, list_names) for item in node.elts)
         return f"make_int_list((int[]){{{values}}}, {len(node.elts)})"
+    if isinstance(node, ast.ListComp):
+        raise ValueError("列表推导式需要在赋值语句中处理")
     if isinstance(node, ast.Subscript):
         value = expression(node.value, list_names)
         if isinstance(node.slice, ast.Slice):
@@ -61,19 +64,19 @@ def expression(node, list_names=None):
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的二元运算")
-        return f"({expression(node.left, list_names)} {operator} {expression(node.right, list_names)})"
+        return f"({expression(node.left, list_names, substitutions)} {operator} {expression(node.right, list_names, substitutions)})"
     if isinstance(node, ast.UnaryOp):
         operators = {ast.USub: "-", ast.UAdd: "+", ast.Not: "!"}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的一元运算")
-        return f"{operator}{expression(node.operand, list_names)}"
+        return f"{operator}{expression(node.operand, list_names, substitutions)}"
     if isinstance(node, ast.Compare) and len(node.ops) == 1:
         operators = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
         operator = operators.get(type(node.ops[0]))
         if not operator:
             raise ValueError("不支持的比较运算")
-        return f"({expression(node.left, list_names)} {operator} {expression(node.comparators[0], list_names)})"
+        return f"({expression(node.left, list_names, substitutions)} {operator} {expression(node.comparators[0], list_names, substitutions)})"
     if isinstance(node, ast.BoolOp) and len(node.values) >= 2:
         operator = " && " if isinstance(node.op, ast.And) else " || "
         return "(" + operator.join(expression(item, list_names) for item in node.values) + ")"
@@ -83,6 +86,8 @@ def expression(node, list_names=None):
         return f"abs({expression(node.args[0], list_names)})"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"sum", "min", "max"} and len(node.args) == 1:
         return f"{node.func.id}_int_list({expression(node.args[0], list_names)})"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sorted" and len(node.args) == 1:
+        return f"sorted_int_list({expression(node.args[0], list_names)})"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         args = ", ".join(expression(arg, list_names) for arg in node.args)
         return f"{node.func.id}({args})"
@@ -112,14 +117,28 @@ def statement(node, indent, declared, list_names):
         return [f"{prefix}return {expression(node.value, list_names)};"]
     if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
         target = node.targets[0].id
+        if isinstance(node.value, ast.ListComp):
+            if len(node.value.generators) != 1 or node.value.generators[0].ifs or not isinstance(node.value.generators[0].target, ast.Name) or not isinstance(node.value.generators[0].iter, ast.Name):
+                raise ValueError("列表推导式目前只支持单个列表来源且不带条件")
+            generator = node.value.generators[0]
+            source = expression(generator.iter, list_names)
+            variable = generator.target.id
+            value = expression(node.value.elt, list_names, {variable: f"{source}.data[i]"})
+            declared.add(target)
+            list_names.add(target)
+            return [f"{prefix}IntList {target} = make_empty_int_list();", f"{prefix}for (int i = 0; i < {source}.length; i++) {{", f"{prefix}    append_int_list(&{target}, {value});", f"{prefix}}}"]
         value = expression(node.value, list_names)
         if target in declared:
             return [f"{prefix}{target} = {value};"]
         declared.add(target)
-        if isinstance(node.value, (ast.List, ast.Subscript)) and (isinstance(node.value, ast.List) or isinstance(node.value.slice, ast.Slice)):
+        if isinstance(node.value, (ast.List, ast.Subscript, ast.ListComp)) and (isinstance(node.value, (ast.List, ast.ListComp)) or isinstance(node.value.slice, ast.Slice)):
             list_names.add(target)
             return [f"{prefix}IntList {target} = {value};"]
         return [f"{prefix}int {target} = {value};"]
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == "append" and len(node.value.args) == 1:
+        if not isinstance(node.value.func.value, ast.Name):
+            raise ValueError("append 目前只支持变量列表")
+        return [f"{prefix}append_int_list(&{node.value.func.value.id}, {expression(node.value.args[0], list_names)});"]
     if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
         operators = {ast.Add: "+=", ast.Sub: "-=", ast.Mult: "*=", ast.Div: "/=", ast.Mod: "%="}
         operator = operators.get(type(node.op))
@@ -187,8 +206,12 @@ def convert_record(record, output_dir):
             list_args.add(node.value.id)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "len" and node.args and isinstance(node.args[0], ast.Name):
             list_args.add(node.args[0].id)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "append" and isinstance(node.func.value, ast.Name):
+            list_args.add(node.func.value.id)
+        if isinstance(node, ast.For) and isinstance(node.iter, ast.Name):
+            list_args.add(node.iter.id)
     args = ", ".join(f"IntList {arg.arg}" if arg.arg in list_args else f"int {arg.arg}" for arg in function.args.args)
-    lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; } IntList;", "", "static IntList make_int_list(int *data, int length) { return (IntList){data, length}; }", "static int sum_int_list(IntList list) { int result = 0; for (int i = 0; i < list.length; i++) result += list.data[i]; return result; }", "static int min_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] < result) result = list.data[i]; return result; }", "static int max_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] > result) result = list.data[i]; return result; }", "static IntList slice_int_list(IntList list, int start, int stop) { if (start < 0) start = 0; if (stop > list.length) stop = list.length; if (stop < start) stop = start; return make_int_list(list.data + start, stop - start); }", "", f"int {function.name}({args}) {{"]
+    lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; int capacity; } IntList;", "", "static IntList make_empty_int_list(void) { return (IntList){malloc(sizeof(int) * 4), 0, 4}; }", "static IntList make_int_list(int *data, int length) { IntList result = make_empty_int_list(); while (result.capacity < length) { result.capacity *= 2; result.data = realloc(result.data, sizeof(int) * result.capacity); } for (int i = 0; i < length; i++) result.data[i] = data[i]; result.length = length; return result; }", "static void append_int_list(IntList *list, int value) { if (list->length == list->capacity) { list->capacity *= 2; list->data = realloc(list->data, sizeof(int) * list->capacity); } list->data[list->length++] = value; }", "static int sum_int_list(IntList list) { int result = 0; for (int i = 0; i < list.length; i++) result += list.data[i]; return result; }", "static int min_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] < result) result = list.data[i]; return result; }", "static int max_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] > result) result = list.data[i]; return result; }", "static IntList slice_int_list(IntList list, int start, int stop) { if (start < 0) start = 0; if (stop > list.length) stop = list.length; if (stop < start) stop = start; return make_int_list(list.data + start, stop - start); }", "static IntList sorted_int_list(IntList list) { IntList result = make_int_list(list.data, list.length); for (int i = 0; i < result.length; i++) for (int j = i + 1; j < result.length; j++) if (result.data[j] < result.data[i]) { int t = result.data[i]; result.data[i] = result.data[j]; result.data[j] = t; } return result; }", "", f"int {function.name}({args}) {{"]
     declared = {arg.arg for arg in function.args.args}
     list_names = set(list_args)
     for node in function.body:
