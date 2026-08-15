@@ -32,7 +32,8 @@ def value_type(value):
     return None
 
 
-def expression(node):
+def expression(node, list_names=None):
+    list_names = list_names or set()
     if isinstance(node, ast.Constant):
         if isinstance(node.value, bool):
             return "1" if node.value else "0"
@@ -43,29 +44,39 @@ def expression(node):
         return repr(node.value)
     if isinstance(node, ast.Name):
         return node.id
+    if isinstance(node, ast.List):
+        values = ", ".join(expression(item, list_names) for item in node.elts)
+        return f"make_int_list((int[]){{{values}}}, {len(node.elts)})"
+    if isinstance(node, ast.Subscript):
+        return f"{expression(node.value, list_names)}.data[{expression(node.slice, list_names)}]"
     if isinstance(node, ast.BinOp):
         operators = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/", ast.FloorDiv: "/", ast.Mod: "%"}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的二元运算")
-        return f"({expression(node.left)} {operator} {expression(node.right)})"
+        return f"({expression(node.left, list_names)} {operator} {expression(node.right, list_names)})"
     if isinstance(node, ast.UnaryOp):
         operators = {ast.USub: "-", ast.UAdd: "+", ast.Not: "!"}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的一元运算")
-        return f"{operator}{expression(node.operand)}"
+        return f"{operator}{expression(node.operand, list_names)}"
     if isinstance(node, ast.Compare) and len(node.ops) == 1:
         operators = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
         operator = operators.get(type(node.ops[0]))
         if not operator:
             raise ValueError("不支持的比较运算")
-        return f"({expression(node.left)} {operator} {expression(node.comparators[0])})"
+        return f"({expression(node.left, list_names)} {operator} {expression(node.comparators[0], list_names)})"
     if isinstance(node, ast.BoolOp) and len(node.values) >= 2:
         operator = " && " if isinstance(node.op, ast.And) else " || "
-        return "(" + operator.join(expression(item) for item in node.values) + ")"
+        return "(" + operator.join(expression(item, list_names) for item in node.values) + ")"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "len" and len(node.args) == 1:
+        return f"{expression(node.args[0], list_names)}.length"
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "abs" and len(node.args) == 1:
-        return f"abs({expression(node.args[0])})"
+        return f"abs({expression(node.args[0], list_names)})"
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        args = ", ".join(expression(arg, list_names) for arg in node.args)
+        return f"{node.func.id}({args})"
     raise ValueError(f"不支持的表达式: {ast.dump(node, include_attributes=False)}")
 
 
@@ -82,43 +93,46 @@ def range_expression(node):
     return values[0], values[1], values[2]
 
 
-def statement(node, indent, declared):
+def statement(node, indent, declared, list_names):
     prefix = "    " * indent
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
         return []
     if isinstance(node, ast.Pass):
         return []
     if isinstance(node, ast.Return):
-        return [f"{prefix}return {expression(node.value)};"]
+        return [f"{prefix}return {expression(node.value, list_names)};"]
     if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
         target = node.targets[0].id
-        value = expression(node.value)
+        value = expression(node.value, list_names)
         if target in declared:
             return [f"{prefix}{target} = {value};"]
         declared.add(target)
+        if isinstance(node.value, ast.List):
+            list_names.add(target)
+            return [f"{prefix}IntList {target} = {value};"]
         return [f"{prefix}int {target} = {value};"]
     if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
         operators = {ast.Add: "+=", ast.Sub: "-=", ast.Mult: "*=", ast.Div: "/=", ast.Mod: "%="}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的复合赋值")
-        return [f"{prefix}{node.target.id} {operator} {expression(node.value)};"]
+        return [f"{prefix}{node.target.id} {operator} {expression(node.value, list_names)};"]
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
         if isinstance(node.value.func, ast.Name) and node.value.func.id == "assert" and len(node.value.args) == 1:
-            return [f"{prefix}assert({expression(node.value.args[0])});"]
+            return [f"{prefix}assert({expression(node.value.args[0], list_names)});"]
     if isinstance(node, ast.If) and len(node.orelse) == 0:
-        lines = [f"{prefix}if ({expression(node.test)}) {{"]
+        lines = [f"{prefix}if ({expression(node.test, list_names)}) {{"]
         for child in node.body:
-            lines.extend(statement(child, indent + 1, declared))
+            lines.extend(statement(child, indent + 1, declared, list_names))
         lines.append(f"{prefix}}}")
         return lines
     if isinstance(node, ast.If):
-        lines = [f"{prefix}if ({expression(node.test)}) {{"]
+        lines = [f"{prefix}if ({expression(node.test, list_names)}) {{"]
         for child in node.body:
-            lines.extend(statement(child, indent + 1, declared))
+            lines.extend(statement(child, indent + 1, declared, list_names))
         lines.append(f"{prefix}}} else {{")
         for child in node.orelse:
-            lines.extend(statement(child, indent + 1, declared))
+            lines.extend(statement(child, indent + 1, declared, list_names))
         lines.append(f"{prefix}}}")
         return lines
     if isinstance(node, ast.For) and isinstance(node.target, ast.Name):
@@ -129,15 +143,15 @@ def statement(node, indent, declared):
         condition = f"{target} < {stop}" if step == "1" else f"{target} > {stop}"
         lines = [f"{prefix}for (int {target} = {start}; {condition}; {target} += {step}) {{"]
         for child in node.body:
-            lines.extend(statement(child, indent + 1, declared))
+            lines.extend(statement(child, indent + 1, declared, list_names))
         lines.append(f"{prefix}}}")
         if node.orelse:
             raise ValueError("for...else 未实现")
         return lines
     if isinstance(node, ast.While):
-        lines = [f"{prefix}while ({expression(node.test)}) {{"]
+        lines = [f"{prefix}while ({expression(node.test, list_names)}) {{"]
         for child in node.body:
-            lines.extend(statement(child, indent + 1, declared))
+            lines.extend(statement(child, indent + 1, declared, list_names))
         lines.append(f"{prefix}}}")
         if node.orelse:
             raise ValueError("while...else 未实现")
@@ -158,11 +172,18 @@ def convert_record(record, output_dir):
     if len(functions) != 1:
         raise ValueError("每条记录必须包含一个顶层函数")
     function = functions[0]
-    args = ", ".join(f"int {arg.arg}" for arg in function.args.args)
-    lines = ["#include <assert.h>", "#include <stdlib.h>", "", f"int {function.name}({args}) {{"]
+    list_args = set()
+    for node in ast.walk(function):
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            list_args.add(node.value.id)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "len" and node.args and isinstance(node.args[0], ast.Name):
+            list_args.add(node.args[0].id)
+    args = ", ".join(f"IntList {arg.arg}" if arg.arg in list_args else f"int {arg.arg}" for arg in function.args.args)
+    lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; } IntList;", "", "static IntList make_int_list(int *data, int length) { return (IntList){data, length}; }", "", f"int {function.name}({args}) {{"]
     declared = {arg.arg for arg in function.args.args}
+    list_names = set(list_args)
     for node in function.body:
-        lines.extend(statement(node, 1, declared))
+        lines.extend(statement(node, 1, declared, list_names))
     if not function.body or not isinstance(function.body[-1], ast.Return):
         raise ValueError("函数必须以 return 结束")
     lines.append("}")
@@ -175,7 +196,8 @@ def convert_record(record, output_dir):
             assertion = match.group(1)
             if assertion.startswith("(") and assertion.endswith(")"):
                 assertion = assertion[1:-1]
-            lines.append(f"\nint main(void) {{\n    assert({assertion});\n    return 0;\n}}")
+            assertion_code = expression(ast.parse(assertion, mode="eval").body, list_names)
+            lines.append(f"\nint main(void) {{\n    assert({assertion_code});\n    return 0;\n}}")
             break
     path = output_dir / f"{task_id}.c"
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
