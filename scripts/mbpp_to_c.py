@@ -41,7 +41,19 @@ def value_type(value):
 
 
 def is_list_expression(node):
-    return isinstance(node, (ast.List, ast.ListComp)) or (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice))
+    return isinstance(node, (ast.List, ast.ListComp)) or (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)) or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sorted")
+
+
+def is_list_value(node, list_names):
+    if isinstance(node, ast.Name):
+        return node.id in list_names
+    if is_list_expression(node):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id == "sorted" and len(node.args) == 1
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return is_list_value(node.left, list_names) or is_list_value(node.right, list_names)
+    return False
 
 
 def expression(node, list_names=None, substitutions=None):
@@ -74,18 +86,24 @@ def expression(node, list_names=None, substitutions=None):
             return f"slice_int_list({value}, {start}, {stop})"
         return f"{value}.data[{expression(node.slice, list_names)}]"
     if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Add) and (is_list_value(node.left, list_names) or is_list_value(node.right, list_names)):
+            raise ValueError("不支持列表拼接：需要实现 IntList 连接语义")
         operators = {ast.Add: "+", ast.Sub: "-", ast.Mult: "*", ast.Div: "/", ast.FloorDiv: "/", ast.Mod: "%"}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的二元运算")
         return f"({expression(node.left, list_names, substitutions)} {operator} {expression(node.right, list_names, substitutions)})"
     if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not) and is_list_value(node.operand, list_names):
+            raise ValueError("不支持列表真值判断：需要定义空列表与非空列表语义")
         operators = {ast.USub: "-", ast.UAdd: "+", ast.Not: "!"}
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的一元运算")
         return f"{operator}{expression(node.operand, list_names, substitutions)}"
     if isinstance(node, ast.Compare) and len(node.ops) == 1:
+        if is_list_value(node.left, list_names) or is_list_value(node.comparators[0], list_names):
+            raise ValueError("不支持列表比较：需要实现按元素比较语义")
         operators = {ast.Eq: "==", ast.NotEq: "!=", ast.Lt: "<", ast.LtE: "<=", ast.Gt: ">", ast.GtE: ">="}
         operator = operators.get(type(node.ops[0]))
         if not operator:
@@ -251,6 +269,10 @@ def convert_record(record, output_dir):
             list_args.add(node.iter.id)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"sum", "min", "max", "sorted"} and len(node.args) == 1 and isinstance(node.args[0], ast.Name):
             list_args.add(node.args[0].id)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sorted" and len(node.args) == 1:
+            for child in ast.walk(node.args[0]):
+                if isinstance(child, ast.Name):
+                    list_args.add(child.id)
     args = ", ".join(f"IntList {arg.arg}" if arg.arg in list_args else f"int {arg.arg}" for arg in function.args.args)
     lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; int capacity; } IntList;", "", "static IntList make_empty_int_list(void) { return (IntList){malloc(sizeof(int) * 4), 0, 4}; }", "static IntList make_int_list(int *data, int length) { IntList result = make_empty_int_list(); while (result.capacity < length) { result.capacity *= 2; result.data = realloc(result.data, sizeof(int) * result.capacity); } for (int i = 0; i < length; i++) result.data[i] = data[i]; result.length = length; return result; }", "static void append_int_list(IntList *list, int value) { if (list->length == list->capacity) { list->capacity *= 2; list->data = realloc(list->data, sizeof(int) * list->capacity); } list->data[list->length++] = value; }", "static int sum_int_list(IntList list) { int result = 0; for (int i = 0; i < list.length; i++) result += list.data[i]; return result; }", "static int min_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] < result) result = list.data[i]; return result; }", "static int max_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] > result) result = list.data[i]; return result; }", "static IntList slice_int_list(IntList list, int start, int stop) { if (start < 0) start = 0; if (stop > list.length) stop = list.length; if (stop < start) stop = start; return make_int_list(list.data + start, stop - start); }", "static IntList sorted_int_list(IntList list) { IntList result = make_int_list(list.data, list.length); for (int i = 0; i < result.length; i++) for (int j = i + 1; j < result.length; j++) if (result.data[j] < result.data[i]) { int t = result.data[i]; result.data[i] = result.data[j]; result.data[j] = t; } return result; }", "", f"int {function.name}({args}) {{"]
     local_types = local_declarations(function)
