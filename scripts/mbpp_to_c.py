@@ -144,10 +144,16 @@ def range_expression(node):
         raise ValueError("range 参数数量不支持")
     values = [expression(arg) for arg in node.args]
     if len(values) == 1:
-        return "0", values[0], "1"
+        return "0", values[0], "1", "<"
     if len(values) == 2:
-        return values[0], values[1], "1"
-    return values[0], values[1], values[2]
+        return values[0], values[1], "1", "<"
+    step = node.args[2]
+    if isinstance(step, ast.Constant) and isinstance(step.value, (int, float)):
+        if step.value == 0:
+            raise ValueError("range 步长不能为 0")
+        operator = ">" if step.value < 0 else "<"
+        return values[0], values[1], values[2], operator
+    raise ValueError("range 目前只支持常量步长")
 
 
 def statement(node, indent, declared, list_names):
@@ -205,11 +211,11 @@ def statement(node, indent, declared, list_names):
         lines.append(f"{prefix}}}")
         return lines
     if isinstance(node, ast.For) and isinstance(node.target, ast.Name):
-        start, stop, step = range_expression(node.iter)
+        start, stop, step, operator = range_expression(node.iter)
         target = node.target.id
         if target not in declared:
             declared.add(target)
-        condition = f"{target} < {stop}" if step == "1" else f"{target} > {stop}"
+        condition = f"{target} {operator} {stop}"
         lines = [f"{prefix}for (int {target} = {start}; {condition}; {target} += {step}) {{"]
         for child in node.body:
             lines.extend(statement(child, indent + 1, declared, list_names))
