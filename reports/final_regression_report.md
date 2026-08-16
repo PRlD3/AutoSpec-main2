@@ -49,16 +49,18 @@ assert is_Sum_Of_Powers_Of_Two(14) == True
 - 未实现的库函数和方法调用
 - 不支持的复合表达式、语句和数据结构
 
-失败明细见 `reports/latest_conversion_failures.jsonl`。
+失败明细见 `reports/final_float_failures.jsonl`。
 
 ## 生成与运行证据
 
-- 最新 C 输出目录：`output/latest_regression`
-- 最新运行明细：`output/latest_runtime_results.json`
-- 最新运行明细包含 47 个生成文件，其中 `Mbpp_138` 的失败属于 `source_invalid`，最终运行统计将其排除。
+- 最新 C 输出目录：`output/final_float_regression`
+- 最新运行明细：`output/latest_runtime_results.json`；对应的最新 C 文件目录为 `output/final_float_regression`。
+- 最新运行包含 47 个生成文件，其中 `Mbpp_138` 的失败属于 `source_invalid`，最终有效源实现运行统计将其排除。
 - 运行统计报告：`reports/runtime_regression.md`
 - 源无效记录：`reports/source_invalid_cases.json`
 - 机器可读分类统计：`reports/failure_taxonomy.json`
+- Python/C 差分测试：141 条用例中 139 条一致，剩余 2 条均属于 `Mbpp_138` 的源实现无效。
+- 浮点回归：`Mbpp_432` 已生成 `double` 返回类型并通过 `7.5` 测试。
 
 ## 结论
 
