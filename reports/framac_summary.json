@@ -1,7 +1,7 @@
 {
-  "total": 45,
+  "total": 46,
   "proved": 0,
-  "partial": 45,
+  "partial": 46,
   "tool_failure": 0,
   "timeout": 0,
   "unknown": 0
