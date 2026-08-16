@@ -40,6 +40,23 @@ def value_type(value):
     return None
 
 
+def expression_type(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, float):
+        return "double"
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Div):
+            return "double"
+        if expression_type(node.left) == "double" or expression_type(node.right) == "double":
+            return "double"
+    if isinstance(node, ast.UnaryOp):
+        return expression_type(node.operand)
+    return "int"
+
+
+def return_type(function):
+    return "double" if any(expression_type(node.value) == "double" for node in ast.walk(function) if isinstance(node, ast.Return)) else "int"
+
+
 def is_list_expression(node):
     return isinstance(node, (ast.List, ast.ListComp)) or (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice)) or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sorted")
 
@@ -92,7 +109,11 @@ def expression(node, list_names=None, substitutions=None):
         operator = operators.get(type(node.op))
         if not operator:
             raise ValueError("不支持的二元运算")
-        return f"({expression(node.left, list_names, substitutions)} {operator} {expression(node.right, list_names, substitutions)})"
+        left = expression(node.left, list_names, substitutions)
+        right = expression(node.right, list_names, substitutions)
+        if isinstance(node.op, ast.Div):
+            return f"((double)({left}) / ({right}))"
+        return f"({left} {operator} {right})"
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.Not) and is_list_value(node.operand, list_names):
             raise ValueError("不支持列表真值判断：需要定义空列表与非空列表语义")
@@ -297,7 +318,9 @@ def convert_record(record, output_dir):
                 if isinstance(child, ast.Name):
                     list_args.add(child.id)
     args = ", ".join(f"IntList {arg.arg}" if arg.arg in list_args else f"int {arg.arg}" for arg in function.args.args)
+    function_return_type = return_type(function)
     lines = ["#include <assert.h>", "#include <stdlib.h>", "", "typedef struct { int *data; int length; int capacity; } IntList;", "", "static IntList make_empty_int_list(void) { return (IntList){malloc(sizeof(int) * 4), 0, 4}; }", "static IntList make_int_list(int *data, int length) { IntList result = make_empty_int_list(); while (result.capacity < length) { result.capacity *= 2; result.data = realloc(result.data, sizeof(int) * result.capacity); } for (int i = 0; i < length; i++) result.data[i] = data[i]; result.length = length; return result; }", "static void append_int_list(IntList *list, int value) { if (list->length == list->capacity) { list->capacity *= 2; list->data = realloc(list->data, sizeof(int) * list->capacity); } list->data[list->length++] = value; }", "static int sum_int_list(IntList list) { int result = 0; for (int i = 0; i < list.length; i++) result += list.data[i]; return result; }", "static int min_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] < result) result = list.data[i]; return result; }", "static int max_int_list(IntList list) { if (list.length <= 0) return 0; int result = list.data[0]; for (int i = 1; i < list.length; i++) if (list.data[i] > result) result = list.data[i]; return result; }", "static IntList slice_int_list(IntList list, int start, int stop) { if (start < 0) start = 0; if (stop > list.length) stop = list.length; if (stop < start) stop = start; return make_int_list(list.data + start, stop - start); }", "static IntList sorted_int_list(IntList list) { IntList result = make_int_list(list.data, list.length); for (int i = 0; i < result.length; i++) for (int j = i + 1; j < result.length; j++) if (result.data[j] < result.data[i]) { int t = result.data[i]; result.data[i] = result.data[j]; result.data[j] = t; } return result; }", "", f"int {function.name}({args}) {{"]
+    lines = [line.replace(f"int {function.name}(", f"{function_return_type} {function.name}(", 1) for line in lines]
     local_types = local_declarations(function)
     declared = {arg.arg for arg in function.args.args} | set(local_types)
     list_names = set(list_args)
