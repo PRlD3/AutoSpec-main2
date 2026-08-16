@@ -1,0 +1,33 @@
+{
+  "timestamp_utc": "2026-08-16",
+  "platform": "Windows",
+  "tools": {
+    "python": {
+      "status": "available",
+      "path": "D:\\myscs\\ucrt64\\bin\\python.exe",
+      "version": "Python 3.14.3"
+    },
+    "gcc": {
+      "status": "available",
+      "path": "D:\\myscs\\ucrt64\\bin\\gcc.exe",
+      "version": "gcc.exe (Rev13, Built by MSYS2 project) 15.2.0"
+    },
+    "clang": {
+      "status": "not_found"
+    },
+    "frama-c": {
+      "status": "not_found"
+    },
+    "veri-clang": {
+      "status": "not_found"
+    },
+    "alt-ergo": {
+      "status": "not_found"
+    },
+    "z3": {
+      "status": "not_found"
+    }
+  },
+  "formal_verification_status": "blocked_by_missing_tools",
+  "next_action": "安装并配置 Frama-C、veri-clang 及至少一个 WP prover 后运行黄金样例"
+}
