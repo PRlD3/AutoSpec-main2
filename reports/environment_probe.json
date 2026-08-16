@@ -1,6 +1,6 @@
 {
   "timestamp_utc": "2026-08-16",
-  "platform": "Windows",
+  "platform": "Windows with WSL2 Ubuntu",
   "tools": {
     "python": {
       "status": "available",
@@ -16,18 +16,27 @@
       "status": "not_found"
     },
     "frama-c": {
-      "status": "not_found"
+      "status": "available_in_wsl",
+      "version": "33.0 (Arsenic)",
+      "installation": "opam switch 5.1.1"
     },
     "veri-clang": {
       "status": "not_found"
     },
     "alt-ergo": {
-      "status": "not_found"
+      "status": "available_as_frama_c_dependency",
+      "version": "2.4.3"
     },
     "z3": {
-      "status": "not_found"
+      "status": "available_in_wsl",
+      "version": "4.8.12"
     }
   },
-  "formal_verification_status": "blocked_by_missing_tools",
-  "next_action": "安装并配置 Frama-C、veri-clang 及至少一个 WP prover 后运行黄金样例"
+  "formal_verification_status": "frama_c_wp_verified_in_wsl",
+  "golden_case": {
+    "input": "output/final_float_regression/Mbpp_432.c",
+    "command": "frama-c -wp -wp-prover z3 -wp-timeout 10 Mbpp_432.c",
+    "result": "4/5 goals proved; 1 Z3 unknown assertion-library goal"
+  },
+  "next_action": "配置 Windows 到 WSL 的统一调用入口，并处理 veri-clang 与剩余 WP unknown goal"
 }

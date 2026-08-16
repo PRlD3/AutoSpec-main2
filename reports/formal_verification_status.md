@@ -2,20 +2,18 @@
 
 ## 探针结果
 
-当前 Windows 环境已确认：
+当前 Windows + WSL2 Ubuntu 环境已确认：
 
 - Python 3.14.3 可用
 - GCC 15.2.0 可用
-- Clang 不在 PATH 中
-- Frama-C 不在 PATH 中
-- veri-clang 不在 PATH 中
-- Alt-Ergo 不在 PATH 中
-- Z3 不在 PATH 中
+- Windows 原生 PATH 中没有 Clang、Frama-C、veri-clang、Alt-Ergo 和 Z3
+- WSL2 Ubuntu 中已安装 Z3 4.8.12
+- WSL2 opam switch `5.1.1` 中已安装 Frama-C 33.0 和 Alt-Ergo 2.4.3
 
 ## 当前结论
 
-目前只能完成 Python-to-C 转换、GCC 编译和运行时回归，不能声称已经完成 AutoSpec/Frama-C 形式化验证。Frama-C/WP 黄金样例暂时无法执行，状态记为 `blocked_by_missing_tools`。
+已在 WSL2 中成功运行 Frama-C/WP 黄金样例 `Mbpp_432.c`。命令使用 Z3 prover，结果为 `4 / 5` 个目标证明，其中 1 个是 `__FC_assert` 相关的 Z3 `Unknown`，不是 Frama-C 环境缺失。当前状态为 `frama_c_wp_verified_in_wsl`。
 
 ## 解除阻塞条件
 
-需要先配置 Frama-C、veri-clang 和至少一个 WP prover，并确认这些命令可以从当前终端直接调用。环境恢复后，先运行无 LLM 依赖的 Frama-C/WP 黄金样例，再执行 AutoSpec 样例回归。
+下一步需要建立 Windows 脚本到 WSL 的统一调用入口，并补充 `veri-clang`。在此之前，形式化验证命令应通过 `wsl -d Ubuntu -- ...` 执行，不能直接假设 Windows PATH 中存在 `frama-c` 或 `z3`。
