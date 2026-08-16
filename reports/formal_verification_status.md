@@ -12,8 +12,8 @@
 
 ## 当前结论
 
-已在 WSL2 中成功运行 Frama-C/WP 黄金样例 `Mbpp_432.c`。命令使用 Z3 prover，结果为 `4 / 5` 个目标证明，其中 1 个是 `__FC_assert` 相关的 Z3 `Unknown`，不是 Frama-C 环境缺失。当前状态为 `frama_c_wp_verified_in_wsl`。
+已在 WSL2 中成功运行 Frama-C/WP 黄金样例 `Mbpp_432.c`。命令使用 Z3 prover，结果为 `4 / 5` 个目标证明，其中 1 个是 `__FC_assert` 相关的 Z3 `Unknown`，不是 Frama-C 环境缺失。随后对其余 45 个可执行样例完成批量验证，45 个均生成了可解析证明结果，但均为部分证明。
 
 ## 解除阻塞条件
 
-下一步需要建立 Windows 脚本到 WSL 的统一调用入口，并补充 `veri-clang`。在此之前，形式化验证命令应通过 `wsl -d Ubuntu -- ...` 执行，不能直接假设 Windows PATH 中存在 `frama-c` 或 `z3`。
+批量入口已建立为 `scripts/run_framac_batch.py`，结果见 `reports/framac_batch_report.md`、`reports/framac_remaining_results.jsonl` 和 `reports/framac_summary.json`。下一步应建立 Windows 脚本到 WSL 的统一调用入口，并为生成的列表辅助函数补充 ACSL contracts；形式化验证命令仍应通过 `wsl -d Ubuntu -- ...` 执行。
